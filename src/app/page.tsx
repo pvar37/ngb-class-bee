@@ -17,7 +17,7 @@ export default function StudentEntryScreen() {
   useEffect(() => {
     const existingSession = localStorage.getItem('ngb_student_id');
     if (existingSession) {
-      router.push('/classbee/exam');
+      router.push('/exam');
     }
   }, [router]);
 
@@ -50,7 +50,7 @@ export default function StudentEntryScreen() {
       }
 
       localStorage.setItem('ngb_student_id', studentId);
-      router.push('/classbee/exam');
+      router.push('/exam');
 
     } catch (err) {
       setError('Network error. Please check your connection and try again.');
