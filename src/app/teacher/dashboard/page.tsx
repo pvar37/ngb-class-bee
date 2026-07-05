@@ -15,6 +15,7 @@ interface Student {
   end_time: string;
   school_id: string;
   rank: number;
+  infractions: number;
 }
 
 const getTieBreakingQuestion = (str1: string, str2: string) => {
@@ -102,7 +103,7 @@ export default function TeacherDashboard() {
       });
 
       // 4. Build CSV Headers
-      const headers = ['Rank', 'First Name', 'Last Name', 'Grade', 'Score', 'Start Time', 'End Time'];
+      const headers = ['Rank', 'First Name', 'Last Name', 'Grade', 'Score', 'Security Flags', 'Start Time', 'End Time'];
       questions.forEach((_, idx) => headers.push(`Q${idx + 1}`));
 
       // 5. Build CSV Rows
@@ -113,6 +114,7 @@ export default function TeacherDashboard() {
           s.last_name,
           s.grade,
           s.score,
+          s.infractions > 0 ? `${s.infractions} Infractions` : 'Clean',
           `"${new Date(s.start_time).toLocaleString()}"`, // <-- Wrapped in quotes
           `"${new Date(s.end_time).toLocaleString()}"`    // <-- Wrapped in quotes
         ];
@@ -205,6 +207,7 @@ export default function TeacherDashboard() {
                     <th className="p-4 font-bold">Name</th>
                     <th className="p-4 font-bold">Grade</th>
                     <th className="p-4 font-bold rounded-tr-xl text-right">Score</th>
+                    <th className="p-4 font-bold text-center">Flags</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -221,6 +224,15 @@ export default function TeacherDashboard() {
                       <td className="p-4">{student.first_name} {student.last_name}</td>
                       <td className="p-4">Grade {student.grade}</td>
                       <td className="p-4 text-xl text-right">{student.score}</td>
+                      <td className="p-4 text-center">
+                        {student.infractions > 0 ? (
+                          <span className="inline-block bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full border border-red-300">
+                            {student.infractions}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-sm">-</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
