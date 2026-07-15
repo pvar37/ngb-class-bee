@@ -207,7 +207,12 @@ export default function TeacherDashboard() {
                     <th className="p-4 font-bold">Name</th>
                     <th className="p-4 font-bold">Grade</th>
                     <th className="p-4 font-bold rounded-tr-xl text-right">Score</th>
-                    <th className="p-4 font-bold text-center">Flags</th>
+                      <th
+                        className="p-4 font-bold text-center cursor-help"
+                        title="The number of times this student navigated away from the exam window or attempted to copy/paste."
+                      >
+                        Infractions ⓘ
+                      </th>
                   </tr>
                 </thead>
                 <tbody>

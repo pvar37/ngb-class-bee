@@ -9,7 +9,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { student_id, answers } = body;
+    const { student_id, answers, infractions } = body;
 
     if (!student_id) {
       return NextResponse.json({ error: 'Missing student ID' }, { status: 400 });
@@ -75,7 +75,8 @@ export async function POST(request: Request) {
       .update({
         score: score,
         tiebreaker_string: tiebreakerString,
-        end_time: new Date().toISOString() // Server-generated end time
+        end_time: new Date().toISOString(), // Server-generated end time
+        infractions: infractions || 0
       })
       .eq('id', student_id);
 

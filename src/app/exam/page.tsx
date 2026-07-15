@@ -54,7 +54,7 @@ export default function ExamEnvironment() {
       const res = await fetch('/api/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_id: studentId, answers: finalAnswers }),
+        body: JSON.stringify({ student_id: studentId, answers: finalAnswers, infractions: infractions }),
       });
 
       if (res.ok) {
@@ -68,7 +68,7 @@ export default function ExamEnvironment() {
       console.warn("Network offline. Retrying submission...");
       setTimeout(submitExam, 5000);
     }
-  }, [router]);
+  }, [router, infractions]);
 
   useEffect(() => {
     async function initializeExam() {
@@ -123,7 +123,7 @@ export default function ExamEnvironment() {
     initializeExam();
   }, [router, submitExam]);
 
-  // Visibility Listener
+  // 2. Add the Visibility & Focus Listeners
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -131,10 +131,17 @@ export default function ExamEnvironment() {
       }
     };
 
+    const handleBlur = () => {
+      registerInfraction("You clicked outside the exam window.");
+    };
+
+    // Listen for both tab changes and window focus loss
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
     };
   }, []);
 
