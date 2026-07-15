@@ -103,7 +103,7 @@ export default function TeacherDashboard() {
       });
 
       // 4. Build CSV Headers
-      const headers = ['Rank', 'First Name', 'Last Name', 'Grade', 'Score', 'Security Flags', 'Start Time', 'End Time'];
+      const headers = ['Rank', 'First Name', 'Last Name', 'Grade', 'Score', 'Infractions', 'Start Time', 'End Time'];
       questions.forEach((_, idx) => headers.push(`Q${idx + 1}`));
 
       // 5. Build CSV Rows
@@ -114,9 +114,9 @@ export default function TeacherDashboard() {
           s.last_name,
           s.grade,
           s.score,
-          s.infractions > 0 ? `${s.infractions} Infractions` : 'Clean',
-          `"${new Date(s.start_time).toLocaleString()}"`, // <-- Wrapped in quotes
-          `"${new Date(s.end_time).toLocaleString()}"`    // <-- Wrapped in quotes
+          s.infractions || 0, // Outputs the exact integer instead of a string
+          `"${new Date(s.start_time).toLocaleString()}"`,
+          `"${new Date(s.end_time).toLocaleString()}"`
         ];
 
         // Append the answer for each specific question, or 'N/A' if skipped
