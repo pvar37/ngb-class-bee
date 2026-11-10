@@ -15,12 +15,16 @@ export async function POST(request: Request) {
 
     const { data: student, error } = await supabase
       .from('students')
-      .select('start_time, has_extended_time')
+      .select('start_time, has_extended_time, end_time')
       .eq('id', student_id)
       .single();
 
     if (error || !student) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+
+    if (student.end_time) {
+      return NextResponse.json({ error: 'Class Bee already completed', completed: true }, { status: 409 });
     }
 
     return NextResponse.json({

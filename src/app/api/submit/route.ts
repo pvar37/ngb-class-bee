@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     }
 
     if (student.end_time) {
-      return NextResponse.json({ error: 'Exam already submitted' }, { status: 403 });
+      return NextResponse.json({ error: 'Class Bee already submitted' }, { status: 403 });
     }
 
     // 2. Authoritative Time Validation
@@ -36,12 +36,12 @@ export async function POST(request: Request) {
     const elapsedSeconds = Math.floor((currentTime - startTime) / 1000);
 
     const allowedSeconds = student.has_extended_time ? 2700 : 1800;
-    const gracePeriod = 120; // 2 minutes to account for offline resilience bulk uploads
+    const gracePeriod = 120; // 2 minutes grace period for network latency and bulk sync
 
     if (elapsedSeconds > allowedSeconds + gracePeriod) {
-      console.warn(`Time violation for student ${student_id}. Elapsed: ${elapsedSeconds}s`);
-      // You can either reject this entirely, or flag it. We will proceed but you can 
-      // add a 'time_violation' boolean column to the database if you prefer to audit them.
+      console.warn(
+        `Late submission recorded for student ${student_id}. Elapsed: ${elapsedSeconds}s (allowed: ${allowedSeconds}s + ${gracePeriod}s). Grading answers to preserve exam record.`
+      );
     }
 
     // 3. Fetch the Answer Key
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     // Since we ordered descending, the loop processes Q50, then Q49, etc.
     for (const q of questions) {
       const studentAnswer = answers[q.id];
-      if (studentAnswer && studentAnswer === q.correct_answer) {
+      if (studentAnswer && studentAnswer.trim() === q.correct_answer?.trim()) {
         score += 1;
         tiebreakerString += '1';
       } else {

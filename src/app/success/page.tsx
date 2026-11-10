@@ -21,10 +21,10 @@ export default function SuccessPage() {
           </div>
         </div>
 
-        <h2 className="font-exo font-bold text-3xl mb-4 text-black">Exam Submitted</h2>
+        <h2 className="font-exo font-bold text-3xl mb-4 text-black">Class Bee Submitted</h2>
 
         <p className="font-libre text-gray-700 text-lg mb-8 leading-relaxed">
-          Congratulations! Your Class Bee exam has been securely submitted and recorded.
+          Congratulations! Your Class Bee answers have been securely submitted and recorded.
         </p>
 
         <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-8">

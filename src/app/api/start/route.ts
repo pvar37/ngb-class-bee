@@ -7,7 +7,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 export async function POST(request: Request) {
   try {
-    const { student_id, firstName, lastName, grade, accessCode } = await request.json();
+    const { student_id, firstName, middleInitial, lastName, grade, accessCode } = await request.json();
 
     // 1. Basic validation
     if (!student_id || !firstName || !lastName || !grade || !accessCode) {
@@ -30,21 +30,36 @@ export async function POST(request: Request) {
 
     // 4. Initialize the student record
     // We pass the frontend-generated UUID so localStorage stays perfectly in sync
-    const { error: insertError } = await supabase
+    const formattedMI = middleInitial ? middleInitial.trim().toUpperCase().slice(0, 1) : null;
+    const studentPayload: Record<string, any> = {
+      id: student_id,
+      first_name: firstName.trim(),
+      last_name: lastName.trim(),
+      grade: parseInt(grade),
+      school_id: school.id,
+      has_extended_time: hasExtendedTime
+    };
+
+    if (formattedMI) {
+      studentPayload.middle_initial = formattedMI;
+    }
+
+    let { error: insertError } = await supabase
       .from('students')
-      .insert({
-        id: student_id,
-        first_name: firstName,
-        last_name: lastName,
-        grade: parseInt(grade),
-        school_id: school.id,
-        has_extended_time: hasExtendedTime
-        // start_time defaults to NOW() in PostgreSQL
-      });
+      .insert(studentPayload);
+
+    // Fallback: If middle_initial column has not been added to PostgreSQL yet,
+    // embed the initial into first_name (e.g. "Alex J.") so student check-in never fails
+    if (insertError && studentPayload.middle_initial && (insertError.code === 'PGRST204' || insertError.message?.includes('middle_initial'))) {
+      delete studentPayload.middle_initial;
+      studentPayload.first_name = `${firstName.trim()} ${formattedMI}.`;
+      const retry = await supabase.from('students').insert(studentPayload);
+      insertError = retry.error;
+    }
 
     if (insertError) {
       console.error('Failed to create student:', insertError);
-      return NextResponse.json({ error: 'Failed to start exam. Please try again.' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to start Class Bee. Please try again.' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true }, { status: 200 });

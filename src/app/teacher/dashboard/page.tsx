@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 interface Student {
   id: string;
   first_name: string;
+  middle_initial?: string;
   last_name: string;
   grade: string;
   score: number;
@@ -18,21 +19,51 @@ interface Student {
   infractions: number;
 }
 
+const formatStudentName = (s: Student) => {
+  if (s.middle_initial) {
+    return `${s.first_name} ${s.middle_initial}. ${s.last_name}`;
+  }
+  return `${s.first_name} ${s.last_name}`;
+};
+
 const getTieBreakingQuestion = (str1: string, str2: string) => {
   if (!str1 || !str2) return null;
   for (let i = 0; i < Math.min(str1.length, str2.length); i++) {
     if (str1[i] !== str2[i]) {
-      return i + 1;
+      // The tiebreaker string is indexed descending from Q50 (index 0) down to Q1 (index 49)
+      return str1.length - i;
     }
   }
   return null;
+};
+
+const escapeCSV = (val: any) => {
+  if (val === null || val === undefined) return '""';
+  const str = String(val);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
+
+const downloadCSV = (filename: string, content: string) => {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 };
 
 export default function TeacherDashboard() {
   const router = useRouter();
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isExporting, setIsExporting] = useState(false);
+  const [exportingType, setExportingType] = useState<'summary' | 'item' | null>(null);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -65,90 +96,160 @@ export default function TeacherDashboard() {
     router.push('/teacher');
   };
 
-  const exportCSV = async () => {
+  const exportSummaryCSV = async () => {
     if (students.length === 0) return;
-    setIsExporting(true);
+    setExportingType('summary');
 
     try {
-      // 1. Fetch questions to generate dynamic Q1, Q2, Q3 headers
+      const headers = [
+        'Rank',
+        'First Name',
+        'M.I.',
+        'Last Name',
+        'Grade',
+        'Score (out of 50)',
+        'Infractions',
+        'Start Time',
+        'End Time'
+      ];
+
+      const rows = students.map(s => [
+        s.rank,
+        escapeCSV(s.first_name),
+        escapeCSV(s.middle_initial || ''),
+        escapeCSV(s.last_name),
+        s.grade,
+        s.score,
+        s.infractions || 0,
+        escapeCSV(new Date(s.start_time).toLocaleString()),
+        escapeCSV(new Date(s.end_time).toLocaleString())
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      downloadCSV('class_bee_summary_roster.csv', csvContent);
+    } catch (err) {
+      console.error('Failed to export summary CSV:', err);
+    } finally {
+      setExportingType(null);
+    }
+  };
+
+  const exportItemAnalysisCSV = async () => {
+    if (students.length === 0) return;
+    setExportingType('item');
+
+    try {
+      // 1. Fetch questions with prompts and correct answers
       const { data: questions, error: qError } = await supabase
         .from('questions')
-        .select('id')
+        .select('id, question_text, correct_answer')
         .order('id', { ascending: true });
 
       if (qError || !questions) {
-        console.error("Failed to load questions for export.");
-        setIsExporting(false);
+        console.error('Failed to load questions for export:', qError);
         return;
       }
 
-      // 2. Fetch all responses for the students currently loaded in the dashboard
+      // 2. Fetch all student responses
       const studentIds = students.map(s => s.id);
       const { data: responses, error: rError } = await supabase
         .from('responses')
-        .select('student_id, question_id, selected_option') // <-- UPDATED HERE
+        .select('student_id, question_id, selected_option')
         .in('student_id', studentIds);
 
       if (rError || !responses) {
-        console.error("Failed to load responses for export. Database error:", rError);
-        setIsExporting(false);
+        console.error('Failed to load responses for export:', rError);
         return;
       }
 
-      // 3. Map responses to a dictionary for O(1) lookups
-      const responseMap: Record<string, Record<string, string>> = {};
+      // 3. Map responses to responseMap[student_id][question_id] = option
+      const responseMap: Record<string, Record<number, string>> = {};
       responses.forEach(r => {
         if (!responseMap[r.student_id]) responseMap[r.student_id] = {};
-        responseMap[r.student_id][r.question_id] = r.selected_option; // <-- UPDATED HERE
+        responseMap[r.student_id][r.question_id] = r.selected_option;
       });
 
-      // 4. Build CSV Headers
-      const headers = ['Rank', 'First Name', 'Last Name', 'Grade', 'Score', 'Infractions', 'Start Time', 'End Time'];
+      // 4. Calculate Question Accuracy counts
+      const questionAccuracy: Record<number, number> = {};
+      questions.forEach(q => {
+        let correctCount = 0;
+        students.forEach(s => {
+          const selected = responseMap[s.id]?.[q.id];
+          if (selected && selected.trim() === q.correct_answer?.trim()) {
+            correctCount += 1;
+          }
+        });
+        questionAccuracy[q.id] = Math.round((correctCount / students.length) * 100);
+      });
+
+      // 5. Build CSV structure
+      // Row 1: Headers
+      const headers = ['Rank', 'First Name', 'M.I.', 'Last Name', 'Grade', 'Score (out of 50)', 'Infractions', 'Start Time', 'End Time'];
       questions.forEach((_, idx) => headers.push(`Q${idx + 1}`));
 
-      // 5. Build CSV Rows
-      const rows = students.map(s => {
+      // Row 2: Answer Key Row
+      const keyRow = ['KEY', 'Correct Answer', '-', '-', '-', '-', '-', '-', '-'];
+      questions.forEach(q => keyRow.push(escapeCSV(q.correct_answer || '')));
+
+      // Row 3: Question Text Prompt Row
+      const promptRow = ['PROMPT', 'Question Text', '-', '-', '-', '-', '-', '-', '-'];
+      questions.forEach(q => promptRow.push(escapeCSV(q.question_text || '')));
+
+      // Row 4: Class Accuracy Percentage Row
+      const accuracyRow = ['STATS', 'Class Accuracy %', '-', '-', '-', '-', '-', '-', '-'];
+      questions.forEach(q => accuracyRow.push(escapeCSV(`${questionAccuracy[q.id]}%`)));
+
+      // Rows 5+: Student Rows with Selected Option + Points (1 pt vs 0 pt)
+      const studentRows = students.map(s => {
         const row = [
           s.rank,
-          s.first_name,
-          s.last_name,
+          escapeCSV(s.first_name),
+          escapeCSV(s.middle_initial || ''),
+          escapeCSV(s.last_name),
           s.grade,
           s.score,
-          s.infractions || 0, // Outputs the exact integer instead of a string
-          `"${new Date(s.start_time).toLocaleString()}"`,
-          `"${new Date(s.end_time).toLocaleString()}"`
+          s.infractions || 0,
+          escapeCSV(new Date(s.start_time).toLocaleString()),
+          escapeCSV(new Date(s.end_time).toLocaleString())
         ];
 
-        // Append the answer for each specific question, or 'N/A' if skipped
         questions.forEach(q => {
-          row.push(responseMap[s.id]?.[q.id] || 'N/A');
+          const selected = responseMap[s.id]?.[q.id];
+          if (!selected) {
+            row.push(escapeCSV('Skipped (0)'));
+          } else {
+            const isCorrect = selected.trim() === q.correct_answer?.trim();
+            row.push(escapeCSV(`${selected} (${isCorrect ? '1' : '0'})`));
+          }
         });
 
         return row;
       });
 
-      // 6. Generate and Download
-      const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', 'class_bee_results.csv');
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const csvContent = [
+        headers.join(','),
+        keyRow.join(','),
+        promptRow.join(','),
+        accuracyRow.join(','),
+        ...studentRows.map(r => r.join(','))
+      ].join('\n');
 
+      downloadCSV('class_bee_item_analysis.csv', csvContent);
     } catch (err) {
-      console.error("Export error:", err);
+      console.error('Failed to export item analysis CSV:', err);
     } finally {
-      setIsExporting(false);
+      setExportingType(null);
     }
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex justify-center items-center bg-ngb-yellow">
+      <div className="min-h-screen flex flex-col justify-center items-center bg-ngb-yellow p-4">
+        <img
+          src="/ngb-logo-text.png"
+          alt="National Geography Bee"
+          className="h-16 w-auto object-contain mb-4 animate-pulse"
+        />
         <h3 className="font-exo font-bold text-2xl text-black">Loading Dashboard...</h3>
       </div>
     );
@@ -168,22 +269,37 @@ export default function TeacherDashboard() {
       <div className="max-w-6xl mx-auto">
 
         {/* Header Controls */}
-        <div className="flex flex-col md:flex-row justify-between items-center bg-white shadow-xl rounded-2xl p-6 mb-8 border-2 border-black">
-          <div>
-            <h1 className="font-bold text-3xl">Class Bee Dashboard</h1>
-            <p className="text-gray-600 font-libre mt-1">Live results and official rankings.</p>
+        <div className="flex flex-col md:flex-row justify-between items-center bg-white shadow-xl rounded-2xl p-6 mb-8 border-2 border-black gap-6">
+          <div className="flex flex-col sm:flex-row items-center gap-5 text-center sm:text-left w-full md:w-auto">
+            <img
+              src="/ngb-logo-text.png"
+              alt="National Geography Bee"
+              className="h-14 md:h-16 w-auto object-contain shrink-0"
+            />
+            <div className="sm:border-l-2 sm:border-gray-200 sm:pl-5">
+              <h1 className="font-bold text-2xl md:text-3xl">Class Bee Dashboard</h1>
+            </div>
           </div>
-          <div className="flex gap-4 mt-4 md:mt-0 w-full md:w-auto">
+          <div className="flex flex-wrap gap-3 w-full md:w-auto justify-center md:justify-end">
             <button
-              onClick={exportCSV}
-              className="flex-1 md:flex-none bg-black text-ngb-yellow px-6 py-3 rounded-full font-bold transition-colors hover:bg-ngb-dark disabled:opacity-50"
-              disabled={students.length === 0 || isExporting}
+              onClick={exportSummaryCSV}
+              className="flex-1 md:flex-none bg-black text-ngb-yellow px-5 py-3 rounded-full font-bold transition-colors hover:bg-ngb-dark disabled:opacity-50 text-sm md:text-base cursor-pointer shadow-sm"
+              disabled={students.length === 0 || exportingType !== null}
+              title="Download summary of student ranks, scores, and infractions"
             >
-              {isExporting ? 'Generating...' : 'Download CSV'}
+              {exportingType === 'summary' ? 'Exporting...' : 'Summary CSV'}
+            </button>
+            <button
+              onClick={exportItemAnalysisCSV}
+              className="flex-1 md:flex-none bg-black text-ngb-yellow px-5 py-3 rounded-full font-bold transition-colors hover:bg-ngb-dark disabled:opacity-50 text-sm md:text-base cursor-pointer shadow-sm"
+              disabled={students.length === 0 || exportingType !== null}
+              title="Download full question-by-question responses, answer key, and 0/1 points"
+            >
+              {exportingType === 'item' ? 'Exporting...' : 'Item Analysis CSV'}
             </button>
             <button
               onClick={handleSignOut}
-              className="flex-1 md:flex-none bg-white text-black border-2 border-black px-6 py-3 rounded-full font-bold transition-colors hover:bg-gray-50"
+              className="flex-1 md:flex-none bg-white text-black border-2 border-black px-5 py-3 rounded-full font-bold transition-colors hover:bg-gray-50 text-sm md:text-base cursor-pointer"
             >
               Sign Out
             </button>
@@ -196,7 +312,7 @@ export default function TeacherDashboard() {
 
           {students.length === 0 ? (
             <div className="text-center py-12 text-gray-500 font-libre text-lg">
-              No students have completed the exam yet.
+              No students have completed the Class Bee yet.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -209,7 +325,7 @@ export default function TeacherDashboard() {
                     <th className="p-4 font-bold rounded-tr-xl text-right">Score</th>
                       <th
                         className="p-4 font-bold text-center cursor-help"
-                        title="The number of times this student navigated away from the exam window or attempted to copy/paste."
+                        title="The number of times this student navigated away from the testing window or attempted to copy/paste."
                       >
                         Infractions ⓘ
                       </th>
@@ -226,7 +342,7 @@ export default function TeacherDashboard() {
                           {student.rank}
                         </span>
                       </td>
-                      <td className="p-4">{student.first_name} {student.last_name}</td>
+                      <td className="p-4">{formatStudentName(student)}</td>
                       <td className="p-4">Grade {student.grade}</td>
                       <td className="p-4 text-xl text-right">{student.score}</td>
                       <td className="p-4 text-center">
@@ -265,17 +381,17 @@ export default function TeacherDashboard() {
                     const brokenOn = getTieBreakingQuestion(student.tiebreaker_string, nextStudent.tiebreaker_string);
                     if (brokenOn) {
                       resolutionText = isTop10
-                        ? `Secured Top 10 spot. Won tie against ${nextStudent.first_name} (Rank ${nextStudent.rank}) on Question ${brokenOn}.`
-                        : `Eliminated. Won tie against ${nextStudent.first_name} (Rank ${nextStudent.rank}) on Question ${brokenOn}, but missed Top 10.`;
+                        ? `Secured Top 10 spot. Won tie against ${formatStudentName(nextStudent)} (Rank ${nextStudent.rank}) on Question ${brokenOn}.`
+                        : `Eliminated. Won tie against ${formatStudentName(nextStudent)} (Rank ${nextStudent.rank}) on Question ${brokenOn}, but missed Top 10.`;
                     } else {
-                      resolutionText = `Exact tie with ${nextStudent.first_name}. Admin review required.`;
+                      resolutionText = `Exact tie with ${formatStudentName(nextStudent)}. Admin review required.`;
                     }
                   }
 
                   return (
                     <div key={student.id} className="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-200 pb-3 last:border-0 last:pb-0">
                       <div className="font-bold text-lg mb-1 md:mb-0">
-                        Rank {student.rank}: {student.first_name} {student.last_name}
+                        Rank {student.rank}: {formatStudentName(student)}
                       </div>
                       <div className={`text-sm font-libre ${isTop10 ? 'text-green-700' : 'text-red-600'}`}>
                         {resolutionText}
